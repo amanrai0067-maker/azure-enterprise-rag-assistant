@@ -56,3 +56,34 @@ Core ComponentsDocument Ingestion: Azure Blob Storage triggers Azure Event Grid 
 cd azure-enterprise-rag-assistant
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+---
+
+## 📊 Step 4 — RAG Evaluation & Benchmarking
+
+To prove the effectiveness of the enterprise upgrades, we built a test evaluation dataset covering diverse query types and measured performance across **Retrieval**, **Generation**, and **System Metrics** before and after optimizations.
+
+### 1. Evaluation Dataset Sample (Test Suite)
+
+| Question | Expected Document | Expected Section | Difficulty | Query Type |
+| :--- | :--- | :--- | :--- | :--- |
+| "What is the file retention period?" | `Data_Retention_Policy.pdf` | Section 3.1 | Easy | Straightforward |
+| "Compare refund policy for Enterprise vs Standard." | `Enterprise_Terms.pdf` & `Standard_Terms.pdf` | Sections 4 & 2 | Hard | Multi-Document |
+| "What is the limit?" | N/A | N/A | Medium | Ambiguous |
+| "What is the CEO's home address?" | N/A (Missing Data) | N/A | Hard | No Answer / Hallucination Trap |
+| "What about Standard?" (Follow-up) | `Standard_Pricing.pdf` | Section 1.2 | Medium | Follow-up |
+
+---
+
+### 2. Evaluation Workflow (Before vs. After)
+
+```text
+ [ Baseline Basic RAG ] 
+         │ (High failure rate on multi-doc, ambiguous & edge cases)
+         ▼
+ [ Identify Failures ] (Weak chunks, outdated versions, hallucinated answers)
+         │
+         ▼
+ [ Improve Architecture ] (Hybrid search, query rewriting, strict prompt grounding)
+         │
+         ▼
+ [ Re-run Evaluation & Benchmark ]

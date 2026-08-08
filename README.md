@@ -87,3 +87,63 @@ To prove the effectiveness of the enterprise upgrades, we built a test evaluatio
          │
          ▼
  [ Re-run Evaluation & Benchmark ]
+---
+
+## 🧠 Step 5 — Architecture & Problem-Solving Deep Dive
+
+### 1. Retrieval Quality: Debugging 1 Relevant Chunk out of 5
+* **Debugging Methodology:**
+  1. **Examine Chunk Boundaries:** Check if the document was split mid-sentence or broke critical contextual relationships. Adjust chunk size to 1000 characters with 150 overlap.
+  2. **Analyze Vector vs. Keyword Weights:** If pure vector search is retrieving semantic neighbors that lack exact terminology, switch immediately to **Hybrid Search (Dense + BM25)**.
+  3. **Tune Reranker Depth:** Increase candidate pool size (e.g., fetch top 50 via hybrid search) and apply a **Semantic Reranker** to push the single relevant chunk to position 1.
+  4. **Evaluate Top-$K$:** Reduce default $K$ from 5 to 3 if noisy chunks dominate the context window.
+
+---
+
+### 2. Latency Bottleneck: Identifying 3s to 12s Inflation
+* **Identification Process:**
+  1. Use **Azure Application Insights & Distributed Tracing** to inspect end-to-end request duration across layers (API Gateway, Search Service, OpenAI API).
+  2. **Isolate Bottlenecks:**
+     * *If Search Tier is slow:* Check Azure AI Search replica/partition utilization or unindexed queries.
+     * *If OpenAI Tier is slow:* Check for rate-limiting (`429 Too Many Requests`) causing automatic SDK retries, or excessive context token counts (>8k tokens).
+* **Optimizations:** Implement **Azure Cache for Redis** for semantic caching and switch to asynchronous FastAPI non-blocking workers.
+
+---
+
+### 3. Scale: Moving from 10k to 5 Million Documents
+* **Architectural Changes:**
+  * **Ingestion Pipeline:** Replace single-worker Azure Functions with **Apache Spark on Azure Databricks** or Azure Batch for distributed, parallel document parsing and embedding generation.
+  * **Search Storage:** Upgrade from Basic/S1 tier to **Azure AI Search S3 High-Density Tier**, leveraging multi-partition horizontal scaling and dedicated read replicas to handle high QPS.
+  * **LLM Inference:** Migrate from Pay-As-You-Go API endpoints to **Provisioned Throughput Units (PTU)** to guarantee dedicated compute capacity and eliminate latency spikes.
+
+---
+
+### 4. Security: Multi-Department Access-Controlled RAG (HR, Finance, Legal, Engineering)
+* **Architectural Solution:**
+  * **Metadata Tagging:** Ingest every document chunk with strict access control tags (e.g., `department: ["HR"]`, `classification: "confidential"`).
+  * **Dynamic OData Filtering:** Extract the user's active security groups from their Microsoft Entra ID JWT token at the FastAPI gateway.
+  * **Search-Time Enforcement:** Automatically inject OData security filters into every Azure AI Search query:
+    ```text
+    search.in(department, 'Engineering,Public') and classification le 'Internal'
+    ```
+    *Result:* Unauthorized HR documents are filtered out at the database layer before retrieval, ensuring zero data leakage.
+
+---
+
+### 5. Cost Optimization: Mitigating Azure OpenAI Cost Spikes
+* **Identification & Optimization Strategy:**
+  * **Tokens & Context:** Implement dynamic top-$K$ selection and extractive summarization to pass only high-value chunks rather than bloated raw text blocks.
+  * **Model Selection:** Route low-complexity tasks (query rewriting, intent classification, guardrail checks) to lightweight models (`gpt-4o-mini`), reserving flagship models (`gpt-4o`) strictly for final answer synthesis.
+  * **Semantic Caching:** Deploy Redis Semantic Cache to serve identical or semantically equivalent user queries instantly without hitting OpenAI endpoints.
+  * **Embeddings:** Generate and store static document embeddings once during offline ingestion, avoiding repeated on-the-fly embedding API calls.
+
+---
+
+### 6. Production Failure: Debugging Correct Answer with Invalid/Fake Citation
+* **Systematic Debugging Methodology:**
+  1. **User Query Analysis:** Check if ambiguous phrasing triggered cross-document search interference.
+  2. **Retrieval Inspection:** Verify if the search engine pulled a decoy chunk that shared high keyword overlap but belonged to an obsolete document version.
+  3. **Ranking Evaluation:** Check if the semantic reranker failed to penalize a hallucinated chunk score.
+  4. **Context & Prompt Review:** Inspect whether passing multiple conflicting chunks confused the LLM regarding source attribution.
+  5. **LLM & Citation Generation:** Identify if the model hallucinated a plausible filename based on training priors despite instructions.
+* **Fix:** Enforce strict system prompt boundaries requiring the model to cite exact chunk metadata IDs supplied in context, paired with a post-generation citation validation layer that rejects outputs referencing non-existent files.
